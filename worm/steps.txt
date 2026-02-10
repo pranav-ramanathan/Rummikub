@@ -40,3 +40,5 @@ We have a new definite trio pivoting on (3,2)
 [0, 1, 1, 2, 2, 2, 0, 0, 1, 0, 0, 0, 1],
 [0, 0, 0, 1, 1, 2, 2, 2, 2, 2, 2, 1, 1],
 [0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1]
+
+These are all the decideable steps
