@@ -459,6 +459,40 @@ def solve(board_matrix, solution=None, depth=0, max_depth=100):
     return None
 
 
+def format_move(move, color_names=None):
+    """Convert a move tuple to human-readable format.
+    
+    Colors are displayed in alphabetical order.
+    """
+    if color_names is None:
+        # Map row indices to color names
+        color_names = ["Red", "Blue", "Yellow", "Black"]
+    
+    if move[0] == 'run':
+        _, row, start, end = move
+        color = color_names[row]
+        # Columns correspond to numbers 1-13
+        numbers = list(range(start + 1, end + 2))
+        return f"Run:   {color} {numbers}"
+    else:  # group
+        _, col, colors = move
+        number = col + 1  # Column index to number (0->1, 1->2, etc.)
+        # Sort colors alphabetically
+        color_list = sorted([color_names[c] for c in colors])
+        return f"Group: {number} [{', '.join(color_list)}]"
+
+
+def format_solution(solution, color_names=None):
+    """Format the entire solution with human-readable moves."""
+    if color_names is None:
+        color_names = ["Black", "Blue", "Red", "Yellow"]
+    
+    formatted = []
+    for i, move in enumerate(solution, 1):
+        formatted.append(f"{i:2d}. {format_move(move, color_names)}")
+    return formatted
+
+
 if __name__ == "__main__":
     from copy import deepcopy
     
@@ -478,13 +512,18 @@ if __name__ == "__main__":
         print(f"Solution found with {len(solution)} moves!")
         print()
         
+        # Display formatted solution
+        print("Solution:")
+        formatted_moves = format_solution(solution)
+        for move_str in formatted_moves:
+            print(f"  {move_str}")
+        print()
+        
         # Verify solution
         board = deepcopy(board_matrix)
-        for i, move in enumerate(solution, 1):
-            print(f"{i:2d}. {move}")
+        for move in solution:
             board = apply_move(board, move)
         
-        print()
         print("Final board:")
         for i, row in enumerate(board):
             print(f"  Row {i}: {row}")
