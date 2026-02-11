@@ -286,23 +286,215 @@ def debug_explicit_moves(board_matrix):
                 print(f"  Row {r}: count={count}, run_options={run_opts}")
 
 
+def get_all_runs(board_matrix):
+    """Get all valid runs on the board."""
+    runs = []
+    rows = len(board_matrix)
+    cols = len(board_matrix[0]) if rows > 0 else 0
+    
+    for row in range(rows):
+        col = 0
+        while col < cols:
+            if board_matrix[row][col] == 0:
+                col += 1
+                continue
+            
+            # Find segment
+            seg_start = col
+            while seg_start > 0 and board_matrix[row][seg_start - 1] > 0:
+                seg_start -= 1
+            seg_end = col
+            while seg_end + 1 < cols and board_matrix[row][seg_end + 1] > 0:
+                seg_end += 1
+            
+            seg_len = seg_end - seg_start + 1
+            if seg_len >= 3:
+                # Generate all valid runs in this segment
+                for start in range(seg_start, seg_end - 1):
+                    for end in range(start + 2, min(seg_end + 1, start + 13)):
+                        if all(board_matrix[row][c] > 0 for c in range(start, end + 1)):
+                            runs.append(('run', row, start, end))
+            
+            col = seg_end + 1
+    
+    return runs
+
+
+def get_all_groups(board_matrix):
+    """Get all valid groups on the board."""
+    from itertools import combinations
+    
+    groups = []
+    rows = len(board_matrix)
+    cols = len(board_matrix[0]) if rows > 0 else 0
+    
+    for col in range(cols):
+        available = [r for r in range(rows) if board_matrix[r][col] > 0]
+        if len(available) >= 3:
+            for size in range(3, len(available) + 1):
+                for combo in combinations(available, size):
+                    groups.append(('group', col, list(combo)))
+    
+    return groups
+
+
+def get_tile_moves(board_matrix, row, col):
+    """Get all valid moves that include this tile."""
+    if board_matrix[row][col] == 0:
+        return []
+    
+    all_moves = get_all_runs(board_matrix) + get_all_groups(board_matrix)
+    tile_moves = []
+    
+    for move in all_moves:
+        if move[0] == 'run':
+            _, r, start, end = move
+            if r == row and start <= col <= end:
+                tile_moves.append(move)
+        else:  # group
+            _, c, colors = move
+            if c == col and row in colors:
+                tile_moves.append(move)
+    
+    return tile_moves
+
+
+def is_solved(board_matrix):
+    """Check if board is fully solved (all tiles used)."""
+    return all(cell == 0 for row in board_matrix for cell in row)
+
+
+def is_valid_state(board_matrix):
+    """Check if current state is valid (no tile has 0 options while still present)."""
+    rows = len(board_matrix)
+    cols = len(board_matrix[0]) if rows > 0 else 0
+    
+    for row in range(rows):
+        for col in range(cols):
+            if board_matrix[row][col] > 0:
+                moves = get_tile_moves(board_matrix, row, col)
+                if len(moves) == 0:
+                    return False
+    return True
+
+
+def solve(board_matrix, solution=None, depth=0, max_depth=100):
+    """Solve the board using DFS with constraint propagation.
+    
+    Algorithm:
+    1. Apply all definite moves
+    2. If solved, return solution
+    3. If invalid, backtrack
+    4. Find tile with minimum options (MRV)
+    5. Try each option recursively
+    
+    Returns solution list or None if no solution.
+    """
+    from copy import deepcopy
+    
+    if solution is None:
+        solution = []
+    
+    if depth > max_depth:
+        return None
+    
+    board = deepcopy(board_matrix)
+    
+    # Step 1: Apply all definite moves
+    while True:
+        definite = find_explicit_moves(board)
+        if not definite:
+            break
+        for move in definite:
+            solution.append(move)
+            board = apply_move(board, move)
+    
+    # Step 2: Check if solved
+    if is_solved(board):
+        return solution
+    
+    # Step 3: Check validity
+    if not is_valid_state(board):
+        return None
+    
+    # Step 4: Find tile with minimum options (MRV heuristic)
+    rows = len(board)
+    cols = len(board[0]) if rows > 0 else 0
+    
+    min_options = float('inf')
+    best_tile = None
+    best_moves = []
+    
+    for row in range(rows):
+        for col in range(cols):
+            if board[row][col] > 0:
+                tile_moves = get_tile_moves(board, row, col)
+                num_options = len(tile_moves)
+                
+                if num_options < min_options:
+                    min_options = num_options
+                    best_tile = (row, col)
+                    best_moves = tile_moves
+                    
+                    # If we find a tile with only 1 option, use it immediately
+                    if num_options == 1:
+                        break
+        if min_options == 1:
+            break
+    
+    if best_tile is None or len(best_moves) == 0:
+        return None
+    
+    # Step 5: Try each option recursively
+    for move in best_moves:
+        new_solution = solution.copy()
+        new_solution.append(move)
+        new_board = apply_move(deepcopy(board), move)
+        
+        result = solve(new_board, new_solution, depth + 1, max_depth)
+        if result is not None:
+            return result
+    
+    # No solution found from this state
+    return None
+
+
 if __name__ == "__main__":
+    from copy import deepcopy
+    
     print("=" * 60)
-    print("Iterating explicit moves from initial state:")
+    print("Solving board with DFS + Constraint Propagation:")
     print("=" * 60)
     print()
     
-    moves = iterate_explicit_moves(board_matrix)
+    print("Initial board:")
+    for i, row in enumerate(board_matrix):
+        print(f"  Row {i}: {row}")
+    print()
     
-    print("\nFinal move sequence:")
-    for i, move in enumerate(moves, 1):
-        print(f"  {i}. {move}")
+    solution = solve(board_matrix)
     
-    print("\n" + "=" * 60)
-    print("Debugging state after first move:")
-    print("=" * 60)
-    
-    # Apply first move and debug
-    first_move = moves[0]
-    board_after = apply_move(board_matrix, first_move)
-    debug_explicit_moves(board_after)
+    if solution:
+        print(f"Solution found with {len(solution)} moves!")
+        print()
+        
+        # Verify solution
+        board = deepcopy(board_matrix)
+        for i, move in enumerate(solution, 1):
+            print(f"{i:2d}. {move}")
+            board = apply_move(board, move)
+        
+        print()
+        print("Final board:")
+        for i, row in enumerate(board):
+            print(f"  Row {i}: {row}")
+        
+        remaining = sum(cell for row in board for cell in row)
+        print(f"\nRemaining tiles: {remaining}")
+        
+        if remaining == 0:
+            print("SUCCESS - Board fully solved!")
+        else:
+            print("ERROR - Tiles remain!")
+    else:
+        print("No solution found.")
