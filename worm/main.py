@@ -1,508 +1,539 @@
-import copy
-from itertools import combinations
+board_matrix = [[1,1,1,0,1,2,2,1,2,2,2,2,2],
+                [0,2,2,2,2,2,0,0,1,0,0,0,1],
+                [0,1,1,1,1,2,2,2,2,2,2,1,1],
+                [0,1,2,1,1,0,0,0,1,0,0,0,1]]
 
-# Board: 4 rows (colors) x 13 columns (numbers 1-13)
-# Cell value = number of that tile in play (0, 1, or 2)
-board_matrix = [
-    [1, 1, 1, 0, 1, 2, 2, 1, 1, 2, 2, 2, 2],
-    [0, 2, 2, 2, 2, 2, 0, 0, 1, 0, 0, 0, 1],
-    [0, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 1, 1],
-    [0, 1, 2, 1, 1, 0, 0, 0, 1, 0, 0, 0, 1],
-]
+def definite_moves(board_matrix):
+    moves = []
+    for i in range(len(board_matrix)):
+        for j in range(len(board_matrix[i])):
+            if board_matrix[i][j] == 0:
+                moves.append((i, j))
+    return moves
 
-COLOR_NAMES = ["Red", "Blue", "Yellow", "Black"]
-
-
-def print_board(board):
-    for i, row in enumerate(row for row in board):
-        print(f"  {COLOR_NAMES[i]:>6}: {row}")
-
-
-def is_solved(board):
-    return all(cell == 0 for row in board for cell in row)
-
-
-# ---------------------------------------------------------------------------
-# Move application / undo
-# ---------------------------------------------------------------------------
-
-def apply_run(board, row, start, end):
-    """Remove one tile per position in the run. Returns True if valid."""
-    for col in range(start, end + 1):
-        if board[row][col] <= 0:
-            return False
-    for col in range(start, end + 1):
-        board[row][col] -= 1
-    return True
-
-
-def undo_run(board, row, start, end):
-    for col in range(start, end + 1):
-        board[row][col] += 1
-
-
-def apply_group(board, col, colors):
-    """Remove one tile per color in the group. Returns True if valid."""
-    for r in colors:
-        if board[r][col] <= 0:
-            return False
-    for r in colors:
-        board[r][col] -= 1
-    return True
-
-
-def undo_group(board, col, colors):
-    for r in colors:
-        board[r][col] += 1
-
-
-# ---------------------------------------------------------------------------
-# Counting options for constraint analysis
-# ---------------------------------------------------------------------------
-
-def get_run_options(board, row, col):
-    """Get all run start positions that include this column."""
-    options = []
-    # Check all windows of size 3 that include this column
-    for start in range(max(0, col - 2), min(13 - 2, col + 1)):
-        if all(board[row][c] > 0 for c in range(start, start + 3)):
-            options.append(start)
-    return options
-
-
-def get_group_options(board, row, col):
-    """Get all group combinations that include this tile."""
-    available = [r for r in range(4) if board[r][col] > 0]
-    if len(available) < 3:
-        return []
+def find_explicit_moves(board_matrix):
+    """Find definite (explicit) moves that must be played.
     
-    options = []
-    for size in range(3, len(available) + 1):
-        for combo in combinations(available, size):
-            if row in combo:
-                options.append(list(combo))
-    return options
-
-
-def count_run_options(board, row, col):
-    """Count how many runs this tile can participate in."""
-    count = 0
-    for start in range(max(0, col - 2), min(13 - 2, col + 1)):
-        if all(board[row][c] > 0 for c in range(start, start + 3)):
-            count += 1
-    return count
-
-
-def count_group_options(board, row, col):
-    """Count how many groups this tile can participate in."""
-    available = [r for r in range(4) if board[r][col] > 0]
-    if len(available) < 3:
-        return 0
+    Based on steps.txt logic:
+    - A run is definite if all tiles have only 1 run option
+    - A group is definite if tiles with count 2 can only form 1 run (forcing them to group),
+      and the column has exactly 3 tiles
     
-    count = 0
-    for size in range(3, len(available) + 1):
-        for combo in combinations(available, size):
-            if row in combo:
-                count += 1
-    return count
-
-
-def count_options(board, row, col):
-    """Total valid sets this tile can join."""
-    return count_run_options(board, row, col) + count_group_options(board, row, col)
-
-
-# ---------------------------------------------------------------------------
-# Finding definite moves (tiles with only 1 valid option)
-# ---------------------------------------------------------------------------
-
-def find_definite_moves(board):
-    """Find all definite moves - tiles/sets with only one valid option.
-    
-    Returns list of moves that are forced (run or group).
+    Returns list of (move_type, details) tuples.
     """
-    definite = []
+    from itertools import combinations
     
-    # Find definite runs
-    for row in range(4):
-        for start in range(13):
-            if board[row][start] <= 0:
+    moves = []
+    rows = len(board_matrix)
+    cols = len(board_matrix[0]) if rows > 0 else 0
+    
+    def count_run_options(row, col):
+        """Count how many different runs this tile can join."""
+        if board_matrix[row][col] == 0:
+            return 0
+        count = 0
+        # Only count runs within contiguous segments
+        # Find segment boundaries
+        seg_start = col
+        while seg_start > 0 and board_matrix[row][seg_start - 1] > 0:
+            seg_start -= 1
+        seg_end = col
+        while seg_end + 1 < cols and board_matrix[row][seg_end + 1] > 0:
+            seg_end += 1
+        
+        # Count valid run windows within this segment that include col
+        for start in range(max(seg_start, col - 2), min(seg_end - 1, col + 1) + 1):
+            if start + 2 <= seg_end and all(board_matrix[row][c] > 0 for c in range(start, start + 3)):
+                count += 1
+        return count
+    
+    def get_valid_runs(row, col):
+        """Get list of all valid runs (start, end) that include this tile."""
+        if board_matrix[row][col] == 0:
+            return []
+        runs = []
+        # Find segment boundaries
+        seg_start = col
+        while seg_start > 0 and board_matrix[row][seg_start - 1] > 0:
+            seg_start -= 1
+        seg_end = col
+        while seg_end + 1 < cols and board_matrix[row][seg_end + 1] > 0:
+            seg_end += 1
+        
+        # Find all valid runs in this segment
+        for start in range(seg_start, seg_end - 1):
+            for end in range(start + 2, min(seg_end + 1, start + 13)):
+                if all(board_matrix[row][c] > 0 for c in range(start, end + 1)):
+                    if start <= col <= end:
+                        runs.append((start, end))
+        return runs
+    
+    # Find definite runs - all tiles have exactly 1 run option
+    for row in range(rows):
+        col = 0
+        while col < cols:
+            if board_matrix[row][col] == 0:
+                col += 1
                 continue
-            # Find maximal contiguous segment
-            end = start
-            while end + 1 < 13 and board[row][end + 1] > 0:
-                end += 1
             
-            seg_len = end - start + 1
+            # Find segment
+            seg_start = col
+            while seg_start > 0 and board_matrix[row][seg_start - 1] > 0:
+                seg_start -= 1
+            seg_end = col
+            while seg_end + 1 < cols and board_matrix[row][seg_end + 1] > 0:
+                seg_end += 1
+            
+            seg_len = seg_end - seg_start + 1
             if seg_len >= 3:
-                # Check each valid sub-run
-                for length in range(3, seg_len + 1):
-                    for s in range(start, start + seg_len - length + 1):
-                        e = s + length - 1
-                        # Count how many tiles in this run have only 1 option
-                        constrained_tiles = sum(
-                            1 for c in range(s, e + 1)
-                            if count_options(board, row, c) == 1
-                        )
-                        if constrained_tiles > 0:
-                            # Check: are the constrained tiles ONLY in this run?
-                            all_forced = True
-                            for c in range(s, e + 1):
-                                if count_options(board, row, c) == 1:
-                                    # This tile must be in a run, check if this is the only run
-                                    if count_run_options(board, row, c) != 1:
-                                        all_forced = False
-                                        break
-                            if all_forced:
-                                definite.append(('run', row, s, e))
-    
-    # Find definite groups
-    for col in range(13):
-        available = [r for r in range(4) if board[r][col] > 0]
-        if len(available) >= 3:
-            # For each possible group size
-            for size in range(3, len(available) + 1):
-                for combo in combinations(available, size):
-                    # Check if any tile in this combo has only this group option
-                    constrained = False
-                    all_forced = True
-                    for r in combo:
-                        if count_options(board, r, col) == 1:
-                            constrained = True
-                            # Verify this tile can ONLY group (not run)
-                            if count_group_options(board, r, col) != 1:
-                                all_forced = False
+                # Check each possible run
+                for run_start in range(seg_start, seg_end - 1):
+                    for run_end in range(run_start + 2, min(seg_end + 1, run_start + 13)):
+                        if not all(board_matrix[row][c] > 0 for c in range(run_start, run_end + 1)):
+                            continue
+                        
+                        # Check if all tiles have exactly 1 run option
+                        all_definite = True
+                        for c in range(run_start, run_end + 1):
+                            if count_run_options(row, c) != 1:
+                                all_definite = False
                                 break
-                    if constrained and all_forced:
-                        definite.append(('group', col, list(combo)))
+                        
+                        if all_definite:
+                            moves.append(('run', row, run_start, run_end))
+            
+            col = seg_end + 1
+    
+    # Find definite groups based on constraint propagation
+    # A group is definite if:
+    # 1. Column has exactly 3 tiles, AND
+    # 2. Either:
+    #    a) A count-2 tile is "consumed" by a forced run (from a count-1 tile with 1 option),
+    #       leaving it with only 1 remaining option for its second copy
+    #    b) A count-1 tile has 0 run options (must use group)
+    #    c) Multiple count-1 tiles are forced into different runs that share this column,
+    #       forcing the count-2 tile to use a group
+    for col in range(cols):
+        available = [(r, board_matrix[r][col]) for r in range(rows) if board_matrix[r][col] > 0]
+        if len(available) != 3:
+            continue
+        
+        colors = [r for r, _ in available]
+        count1_tiles = [(r, c) for r, c in available if board_matrix[r][c] == 1]
+        count2_tiles = [(r, c) for r, c in available if board_matrix[r][c] == 2]
+        
+        # Check case b: any count-1 tile has 0 run options (must use group)
+        if len(count1_tiles) > 0:
+            has_zero_option_tile = False
+            for r, _ in count1_tiles:
+                if count_run_options(r, col) == 0:
+                    has_zero_option_tile = True
+                    break
+            
+            if has_zero_option_tile:
+                moves.append(('group', col, colors))
+                continue
+        
+        # Check case c: count-1 tiles with conflicting forced runs
+        if len(count1_tiles) >= 2 and len(count2_tiles) >= 1:
+            # Check if count-1 tiles are forced into different runs
+            forced_runs_per_tile = {}
+            for r, _ in count1_tiles:
+                runs = get_valid_runs(r, col)
+                # Filter to runs where this tile has only 1 option
+                forced = [run for run in runs if count_run_options(r, col) == 1]
+                if len(forced) == 1:
+                    forced_runs_per_tile[r] = forced[0]
+            
+            # If we have forced runs for count-1 tiles, check if they conflict
+            if len(forced_runs_per_tile) >= 2:
+                # The count-2 tile would need to be in multiple runs simultaneously
+                # which is impossible, so it must use a group
+                moves.append(('group', col, colors))
+                continue
+        
+        # Check case a: count-2 tile consumed by forced run
+        for r, count in available:
+            if count != 2:
+                continue
+            
+            # Get all runs this tile can be in
+            tile_runs = get_valid_runs(r, col)
+            if len(tile_runs) == 0:
+                continue
+            
+            # Check if any run is "forced" because it contains a count-1 tile with only 1 option
+            forced_runs = []
+            for run in tile_runs:
+                run_start, run_end = run
+                # Check each position in this run
+                for c in range(run_start, run_end + 1):
+                    if board_matrix[r][c] == 1 and count_run_options(r, c) == 1:
+                        # This count-1 tile is forced into this run
+                        forced_runs.append(run)
+                        break
+            
+            # If there's a forced run, it consumes one copy
+            # Check remaining options for second copy
+            if len(forced_runs) > 0:
+                remaining_runs = [run for run in tile_runs if run not in forced_runs]
+                # After forced run, how many options remain?
+                remaining_options = len(remaining_runs)
+                
+                # If only 1 run remains (or 0), and column has 3 tiles, group is definite
+                if remaining_options <= 1:
+                    moves.append(('group', col, colors))
+                    break
     
     # Remove duplicates
     seen = set()
     unique = []
-    for move in definite:
+    for move in moves:
         key = str(move)
         if key not in seen:
             seen.add(key)
             unique.append(move)
+    
     return unique
 
-
-# ---------------------------------------------------------------------------
-# Constrained columns (8, 12) - special handling
-# ---------------------------------------------------------------------------
-
-def get_column_group_constraints(board, col):
-    """Analyze group constraints for a specific column.
+def apply_move(board_matrix, move):
+    """Apply a move to the board, reducing tile counts. Returns a new board."""
+    from copy import deepcopy
+    new_board = deepcopy(board_matrix)
     
-    Returns list of (colors_combo, constraint_score) where higher score = more forced.
+    if move[0] == 'run':
+        _, row, start, end = move
+        for col in range(start, end + 1):
+            if new_board[row][col] > 0:
+                new_board[row][col] -= 1
+    elif move[0] == 'group':
+        _, col, colors = move
+        for row in colors:
+            if new_board[row][col] > 0:
+                new_board[row][col] -= 1
+    
+    return new_board
+
+
+def iterate_explicit_moves(board_matrix):
+    """Find and apply all explicit moves iteratively until no more can be found.
+    
+    Returns list of all moves found in order.
     """
-    available = [(r, board[r][col]) for r in range(4) if board[r][col] > 0]
-    if len(available) < 3:
-        return []
+    from copy import deepcopy
     
-    color_indices = [r for r, _ in available]
-    constraints = []
+    board = deepcopy(board_matrix)
+    all_moves = []
+    step = 0
     
-    for size in range(3, len(color_indices) + 1):
-        for combo in combinations(color_indices, size):
-            # Score: how constrained are the tiles in this group?
-            score = 0
-            for r in combo:
-                opts = count_options(board, r, col)
-                if opts == 1:
-                    score += 10  # Definitely forced
-                elif opts == 2:
-                    score += 5   # Highly constrained
-                elif opts <= 3:
-                    score += 2   # Moderately constrained
-            if score > 0:
-                constraints.append((list(combo), score))
+    print(f"Step {step}: Initial state")
+    for row in board:
+        print(f"  {row}")
+    print()
     
-    # Sort by constraint score descending
-    constraints.sort(key=lambda x: -x[1])
-    return constraints
+    while True:
+        moves = find_explicit_moves(board)
+        if not moves:
+            break
+        
+        for move in moves:
+            step += 1
+            all_moves.append(move)
+            board = apply_move(board, move)
+            
+            print(f"Step {step}: Applied {move}")
+            for row in board:
+                print(f"  {row}")
+            print()
+    
+    print(f"No more explicit moves found. Total moves: {len(all_moves)}")
+    return all_moves
 
 
-def find_constrained_column_moves(board, priority_cols=None):
-    """Find moves in priority columns that are highly constrained.
+def debug_explicit_moves(board_matrix):
+    """Debug function to see why moves are/aren't being found."""
+    from itertools import combinations
     
-    Default priority: columns 8 and 12 (indices 8, 12 = numbers 9 and 13)
-    """
-    if priority_cols is None:
-        priority_cols = [8, 12]
+    rows = len(board_matrix)
+    cols = len(board_matrix[0]) if rows > 0 else 0
     
-    moves = []
-    for col in priority_cols:
-        if col >= 13:
-            continue
-        constraints = get_column_group_constraints(board, col)
-        for colors, score in constraints:
-            if score >= 10:  # At least one tile is forced
-                # Verify tiles are still available
-                if all(board[r][col] > 0 for r in colors):
-                    moves.append(('group', col, colors, score))
+    def count_run_options(row, col):
+        if board_matrix[row][col] == 0:
+            return 0
+        count = 0
+        seg_start = col
+        while seg_start > 0 and board_matrix[row][seg_start - 1] > 0:
+            seg_start -= 1
+        seg_end = col
+        while seg_end + 1 < cols and board_matrix[row][seg_end + 1] > 0:
+            seg_end += 1
+        
+        for start in range(max(seg_start, col - 2), min(seg_end - 1, col + 1) + 1):
+            if start + 2 <= seg_end and all(board_matrix[row][c] > 0 for c in range(start, start + 3)):
+                count += 1
+        return count
     
-    # Sort by constraint score
-    moves.sort(key=lambda x: -x[3])
-    return [(m[0], m[1], m[2]) for m in moves]  # Remove score
+    print("Checking each column for potential groups:")
+    for col in range(cols):
+        available = [(r, board_matrix[r][col]) for r in range(rows) if board_matrix[r][col] > 0]
+        if len(available) >= 3:
+            print(f"\nColumn {col}:")
+            print(f"  Available tiles: {available}")
+            print(f"  Number of tiles: {len(available)}")
+            
+            for r, count in available:
+                run_opts = count_run_options(r, col)
+                print(f"  Row {r}: count={count}, run_options={run_opts}")
 
 
-# ---------------------------------------------------------------------------
-# General move generation (for backtracking)
-# ---------------------------------------------------------------------------
-
-def find_all_runs(board):
-    """Find all valid runs (3+ consecutive tiles of same color)."""
+def get_all_runs(board_matrix):
+    """Get all valid runs on the board."""
     runs = []
-    for row in range(4):
-        for start in range(13):
-            if board[row][start] <= 0:
+    rows = len(board_matrix)
+    cols = len(board_matrix[0]) if rows > 0 else 0
+    
+    for row in range(rows):
+        col = 0
+        while col < cols:
+            if board_matrix[row][col] == 0:
+                col += 1
                 continue
-            end = start
-            while end + 1 < 13 and board[row][end + 1] > 0:
-                end += 1
-            seg_len = end - start + 1
+            
+            # Find segment
+            seg_start = col
+            while seg_start > 0 and board_matrix[row][seg_start - 1] > 0:
+                seg_start -= 1
+            seg_end = col
+            while seg_end + 1 < cols and board_matrix[row][seg_end + 1] > 0:
+                seg_end += 1
+            
+            seg_len = seg_end - seg_start + 1
             if seg_len >= 3:
-                for length in range(3, seg_len + 1):
-                    for s in range(start, start + seg_len - length + 1):
-                        runs.append((row, s, s + length - 1))
-    return list(set(runs))
+                # Generate all valid runs in this segment
+                for start in range(seg_start, seg_end - 1):
+                    for end in range(start + 2, min(seg_end + 1, start + 13)):
+                        if all(board_matrix[row][c] > 0 for c in range(start, end + 1)):
+                            runs.append(('run', row, start, end))
+            
+            col = seg_end + 1
+    
+    return runs
 
 
-def find_all_groups(board):
-    """Find all valid groups (3+ tiles of same number, different colors)."""
+def get_all_groups(board_matrix):
+    """Get all valid groups on the board."""
+    from itertools import combinations
+    
     groups = []
-    for col in range(13):
-        available = [r for r in range(4) if board[r][col] > 0]
+    rows = len(board_matrix)
+    cols = len(board_matrix[0]) if rows > 0 else 0
+    
+    for col in range(cols):
+        available = [r for r in range(rows) if board_matrix[r][col] > 0]
         if len(available) >= 3:
             for size in range(3, len(available) + 1):
                 for combo in combinations(available, size):
-                    groups.append((col, list(combo)))
+                    groups.append(('group', col, list(combo)))
+    
     return groups
 
 
-# ---------------------------------------------------------------------------
-# Pruning
-# ---------------------------------------------------------------------------
+def get_tile_moves(board_matrix, row, col):
+    """Get all valid moves that include this tile."""
+    if board_matrix[row][col] == 0:
+        return []
+    
+    all_moves = get_all_runs(board_matrix) + get_all_groups(board_matrix)
+    tile_moves = []
+    
+    for move in all_moves:
+        if move[0] == 'run':
+            _, r, start, end = move
+            if r == row and start <= col <= end:
+                tile_moves.append(move)
+        else:  # group
+            _, c, colors = move
+            if c == col and row in colors:
+                tile_moves.append(move)
+    
+    return tile_moves
 
-def is_valid_board_state(board):
-    """Check that every remaining tile can participate in at least one set."""
-    for row in range(4):
-        for col in range(13):
-            if board[row][col] > 0:
-                run_opts = count_run_options(board, row, col)
-                group_opts = count_group_options(board, row, col)
-                if run_opts == 0 and group_opts == 0:
+
+def is_solved(board_matrix):
+    """Check if board is fully solved (all tiles used)."""
+    return all(cell == 0 for row in board_matrix for cell in row)
+
+
+def is_valid_state(board_matrix):
+    """Check if current state is valid (no tile has 0 options while still present)."""
+    rows = len(board_matrix)
+    cols = len(board_matrix[0]) if rows > 0 else 0
+    
+    for row in range(rows):
+        for col in range(cols):
+            if board_matrix[row][col] > 0:
+                moves = get_tile_moves(board_matrix, row, col)
+                if len(moves) == 0:
                     return False
     return True
 
 
-# ---------------------------------------------------------------------------
-# Tiered Solver
-# ---------------------------------------------------------------------------
-
-def apply_definite_moves(board, solution_list):
-    """Iteratively apply all definite moves. Returns True if progress made."""
-    progress = False
+def solve(board_matrix, solution=None, depth=0, max_depth=100):
+    """Solve the board using DFS with constraint propagation.
+    
+    Algorithm:
+    1. Apply all definite moves
+    2. If solved, return solution
+    3. If invalid, backtrack
+    4. Find tile with minimum options (MRV)
+    5. Try each option recursively
+    
+    Returns solution list or None if no solution.
+    """
+    from copy import deepcopy
+    
+    if solution is None:
+        solution = []
+    
+    if depth > max_depth:
+        return None
+    
+    board = deepcopy(board_matrix)
+    
+    # Step 1: Apply all definite moves
     while True:
-        definite = find_definite_moves(board)
+        definite = find_explicit_moves(board)
         if not definite:
             break
         for move in definite:
-            if move[0] == 'run':
-                _, row, start, end = move
-                if apply_run(board, row, start, end):
-                    solution_list.append(move)
-                    progress = True
-            else:
-                _, col, colors = move
-                if apply_group(board, col, colors):
-                    solution_list.append(move)
-                    progress = True
-    return progress
-
-
-def try_constrained_columns(board, solution_list, depth=0, max_depth=10):
-    """Try constrained column moves with backtracking."""
-    if depth > max_depth:
-        return False
+            solution.append(move)
+            board = apply_move(board, move)
     
-    # First apply any definite moves
-    apply_definite_moves(board, solution_list)
-    
-    if is_solved(board):
-        return True
-    
-    # Try constrained column moves
-    moves = find_constrained_column_moves(board)
-    
-    for move in moves:
-        if move[0] == 'group':
-            _, col, colors = move
-            if not apply_group(board, col, colors):
-                continue
-            
-            solution_list.append(move)
-            
-            # Recursively solve
-            if try_constrained_columns(board, solution_list, depth + 1, max_depth):
-                return True
-            
-            # Backtrack
-            solution_list.pop()
-            undo_group(board, col, colors)
-    
-    return False
-
-
-def dfs_solve(board, solution_list, depth=0, max_depth=50):
-    """General DFS solver for remaining tiles."""
-    if is_solved(board):
-        return True
-    
-    if depth > max_depth:
-        return False
-    
-    # Generate all moves
-    runs = find_all_runs(board)
-    groups = find_all_groups(board)
-    
-    # Score and sort moves by constraint
-    scored_moves = []
-    
-    for run in runs:
-        row, start, end = run
-        if any(board[row][c] <= 0 for c in range(start, end + 1)):
-            continue
-        min_opts = min(count_options(board, row, c) for c in range(start, end + 1))
-        scored_moves.append((min_opts, 0, 'run', run))  # 0 priority for runs
-    
-    for group in groups:
-        col, colors = group
-        if any(board[r][col] <= 0 for r in colors):
-            continue
-        min_opts = min(count_options(board, r, col) for r in colors)
-        scored_moves.append((min_opts, 1, 'group', group))  # 1 priority for groups
-    
-    # Sort: most constrained first, groups before runs
-    scored_moves.sort(key=lambda x: (x[0], -x[1]))
-    
-    for _, _, move_type, move_data in scored_moves:
-        if move_type == 'run':
-            row, start, end = move_data
-            if not apply_run(board, row, start, end):
-                continue
-            
-            solution_list.append(('run', row, start, end))
-            
-            if is_valid_board_state(board):
-                if dfs_solve(board, solution_list, depth + 1, max_depth):
-                    return True
-            
-            solution_list.pop()
-            undo_run(board, row, start, end)
-        else:
-            col, colors = move_data
-            if not apply_group(board, col, colors):
-                continue
-            
-            solution_list.append(('group', col, colors))
-            
-            if is_valid_board_state(board):
-                if dfs_solve(board, solution_list, depth + 1, max_depth):
-                    return True
-            
-            solution_list.pop()
-            undo_group(board, col, colors)
-    
-    return False
-
-
-def solve(board):
-    """Main solver using tiered strategy."""
-    solution = []
-    
-    # Tier 1: Apply definite moves
-    print("Phase 1: Applying definite moves...")
-    apply_definite_moves(board, solution)
-    print(f"  Applied {len(solution)} definite moves")
-    
+    # Step 2: Check if solved
     if is_solved(board):
         return solution
     
-    # Tier 2: Handle constrained columns (8, 12)
-    print("Phase 2: Handling constrained columns...")
-    constrained_solution = []
-    if try_constrained_columns(board, constrained_solution):
-        solution.extend(constrained_solution)
-        print(f"  Applied {len(constrained_solution)} constrained column moves")
-    else:
-        print("  No constrained column solution found, proceeding to DFS")
-    
-    if is_solved(board):
-        return solution
-    
-    # Tier 3: General DFS
-    print("Phase 3: General DFS...")
-    remaining_solution = []
-    if dfs_solve(board, remaining_solution):
-        solution.extend(remaining_solution)
-        print(f"  DFS found {len(remaining_solution)} additional moves")
-    else:
-        print("  DFS failed to find solution")
+    # Step 3: Check validity
+    if not is_valid_state(board):
         return None
     
-    return solution if is_solved(board) else None
+    # Step 4: Find tile with minimum options (MRV heuristic)
+    rows = len(board)
+    cols = len(board[0]) if rows > 0 else 0
+    
+    min_options = float('inf')
+    best_tile = None
+    best_moves = []
+    
+    for row in range(rows):
+        for col in range(cols):
+            if board[row][col] > 0:
+                tile_moves = get_tile_moves(board, row, col)
+                num_options = len(tile_moves)
+                
+                if num_options < min_options:
+                    min_options = num_options
+                    best_tile = (row, col)
+                    best_moves = tile_moves
+                    
+                    # If we find a tile with only 1 option, use it immediately
+                    if num_options == 1:
+                        break
+        if min_options == 1:
+            break
+    
+    if best_tile is None or len(best_moves) == 0:
+        return None
+    
+    # Step 5: Try each option recursively
+    for move in best_moves:
+        new_solution = solution.copy()
+        new_solution.append(move)
+        new_board = apply_move(deepcopy(board), move)
+        
+        result = solve(new_board, new_solution, depth + 1, max_depth)
+        if result is not None:
+            return result
+    
+    # No solution found from this state
+    return None
 
 
-# ---------------------------------------------------------------------------
-# Pretty printing
-# ---------------------------------------------------------------------------
-
-def format_move(move):
+def format_move(move, color_names=None):
+    """Convert a move tuple to human-readable format.
+    
+    Colors are displayed in alphabetical order.
+    """
+    if color_names is None:
+        # Map row indices to color names
+        color_names = ["Red", "Blue", "Yellow", "Black"]
+    
     if move[0] == 'run':
         _, row, start, end = move
+        color = color_names[row]
+        # Columns correspond to numbers 1-13
         numbers = list(range(start + 1, end + 2))
-        return f"Run:   {COLOR_NAMES[row]} {numbers}"
-    else:
+        return f"Run:   {color} {numbers}"
+    else:  # group
         _, col, colors = move
-        number = col + 1
-        color_list = [COLOR_NAMES[c] for c in colors]
-        return f"Group: Number {number} [{', '.join(color_list)}]"
+        number = col + 1  # Column index to number (0->1, 1->2, etc.)
+        # Sort colors alphabetically
+        color_list = sorted([color_names[c] for c in colors])
+        return f"Group: {number} [{', '.join(color_list)}]"
 
 
-# ---------------------------------------------------------------------------
-# Main
-# ---------------------------------------------------------------------------
+def format_solution(solution, color_names=None):
+    """Format the entire solution with human-readable moves."""
+    if color_names is None:
+        color_names = ["Black", "Blue", "Red", "Yellow"]
+    
+    formatted = []
+    for i, move in enumerate(solution, 1):
+        formatted.append(f"{i:2d}. {format_move(move, color_names)}")
+    return formatted
+
 
 if __name__ == "__main__":
-    board = copy.deepcopy(board_matrix)
-
-    print("Starting board:")
-    print_board(board)
+    from copy import deepcopy
+    
+    print("=" * 60)
+    print("Solving board with DFS + Constraint Propagation:")
+    print("=" * 60)
     print()
-
-    total_tiles = sum(cell for row in board for cell in row)
-    print(f"Total tiles: {total_tiles}")
+    
+    print("Initial board:")
+    for i, row in enumerate(board_matrix):
+        print(f"  Row {i}: {row}")
     print()
-
-    print("Solving with tiered strategy...")
-    solution = solve(board)
-
-    if solution is None:
-        print("\nNo solution found!")
-        print("\nRemaining board:")
-        print_board(board)
-    else:
-        print(f"\nSolved! {len(solution)} sets formed:\n")
-        for i, move in enumerate(solution, 1):
-            print(f"  {i:2d}. {format_move(move)}")
-
-        print("\nFinal board:")
-        print_board(board)
+    
+    solution = solve(board_matrix)
+    
+    if solution:
+        print(f"Solution found with {len(solution)} moves!")
+        print()
+        
+        # Display formatted solution
+        print("Solution:")
+        formatted_moves = format_solution(solution)
+        for move_str in formatted_moves:
+            print(f"  {move_str}")
+        print()
+        
+        # Verify solution
+        board = deepcopy(board_matrix)
+        for move in solution:
+            board = apply_move(board, move)
+        
+        print("Final board:")
+        for i, row in enumerate(board):
+            print(f"  Row {i}: {row}")
+        
         remaining = sum(cell for row in board for cell in row)
         print(f"\nRemaining tiles: {remaining}")
+        
         if remaining == 0:
-            print("SUCCESS - Board fully decomposed!")
+            print("SUCCESS - Board fully solved!")
         else:
             print("ERROR - Tiles remain!")
+    else:
+        print("No solution found.")
