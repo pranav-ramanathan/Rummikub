@@ -108,10 +108,10 @@ class ProgressTracker:
             games_per_sec = 0
             eta_str = "--:--:--"
         
-        # Build progress bar
+        # Build progress bar (ASCII only for Windows compatibility)
         bar_width = 40
         filled = int(bar_width * self.completed_games / self.total_games)
-        bar = "█" * filled + "░" * (bar_width - filled)
+        bar = "#" * filled + "-" * (bar_width - filled)
         
         # Clear screen and print progress
         sys.stdout.write("\033[2J\033[H")  # Clear screen and move to top
@@ -245,32 +245,17 @@ class Tournament:
             agent = game_agents[current_player]
             valid_actions = obs['valid_actions_mask']
             
-            # Debug: Check if we're stuck
+            # Debug: Check if we're stuck (5 seconds per step)
             elapsed = time.time() - step_start_time
-            if elapsed > 5.0:  # 5 seconds per step timeout
+            if elapsed > 5.0:
                 print(f"\n[ERROR] Step timeout at step {step}! Breaking.")
-                print(f"[ERROR] Current player: {current_player} ({agent.name})")
-                print(f"[ERROR] Last action: {info.get('action_taken', 'UNKNOWN')}")
                 break
             
-            if step - last_progress_step > 100:
-                print(f"\n[DEBUG] Possible hang at step {step}")
-                print(f"[DEBUG] Current player: {current_player} ({agent.name})")
-                print(f"[DEBUG] Valid actions count: {np.sum(valid_actions)}")
-                print(f"[DEBUG] Hand size: {np.sum(obs['hand_mask'])}")
-                print(f"[DEBUG] Pool size: {obs['pool_size'][0]}")
-                print(f"[DEBUG] Has initial meld: {obs['has_initial_meld'][0]}")
-                last_progress_step = step
-            
             # Agent selects action
-            print(f"[Step {step}] {agent.name} selecting action...")
             action = agent.select_action(obs, valid_actions)
-            print(f"[Step {step}] {agent.name} selected Action {action}")
             
             # Execute action
-            print(f"[Step {step}] Executing action...")
             next_obs, reward, done, info = self.env.step(action)
-            print(f"[Step {step}] Result: {info.get('action_taken', 'UNKNOWN')}, reward={reward:.1f}, done={done}")
             
             step_start_time = time.time()  # Reset timer after successful step
             
@@ -297,6 +282,58 @@ class Tournament:
             
             if done:
                 break
+        
+        # Check if game hit turn limit (timeout)
+        if step >= self.env.max_steps:
+            print(f"\n[DEBUG] GAME TIMED OUT at turn {step}!")
+            print(f"[DEBUG] Printing game state for debugging...")
+            
+            # Print table melds
+            print("\n=== TABLE MELDS ===")
+            table_melds = self.env.game_state.table_melds
+            if table_melds:
+                for i, meld in enumerate(table_melds):
+                    tiles_str = ", ".join([str(t) for t in meld.tiles])
+                    print(f"  Meld {i}: {tiles_str}")
+            else:
+                print("  (empty)")
+            
+            # Print board matrix format
+            print("\n=== BOARD MATRIX ===")
+            color_names = ['Red', 'Blue', 'Black', 'Orange']
+            board_matrix = [[0]*13 for _ in range(4)]
+            for meld in table_melds:
+                for tile in meld.tiles:
+                    if not tile.is_joker and tile.color and tile.number:
+                        row = {'red': 0, 'blue': 1, 'black': 2, 'orange': 3}[tile.color]
+                        board_matrix[row][tile.number-1] += 1
+            
+            for row_idx, row in enumerate(board_matrix):
+                print(f"  {color_names[row_idx]}: {row}")
+            
+            # Print player hands
+            for pid in range(self.num_players):
+                hand = self.env.game_state.player_hands[pid]
+                hand_tiles = [str(t) for t in hand]
+                print(f"\n=== PLAYER {pid+1} HAND ({len(hand)} tiles) ===")
+                print(f"  {hand_tiles}")
+                
+                # Hand matrix
+                hand_matrix = [[0]*13 for _ in range(4)]
+                for tile in hand:
+                    if not tile.is_joker and tile.color and tile.number:
+                        row = {'red': 0, 'blue': 1, 'black': 2, 'orange': 3}[tile.color]
+                        hand_matrix[row][tile.number-1] += 1
+                
+                for row_idx, row in enumerate(hand_matrix):
+                    if sum(row) > 0:
+                        print(f"  {color_names[row_idx]}: {row}")
+            
+            print(f"\n=== GAME INFO ===")
+            print(f"  Turn count: {self.env.game_state.turn_count}")
+            print(f"  Pool remaining: {self.env.game_state.tile_pool.remaining()}")
+            for pid in range(self.num_players):
+                print(f"  Player {pid+1} initial meld: {self.env.game_state.has_initial_meld[pid]}")
         
         # Determine winner
         winner_idx = info.get('winner')
@@ -499,82 +536,10 @@ class Tournament:
         print(f"Results saved to {filename}")
 
 
-def train_agents(agents: List[RummikubAgent], num_episodes: int = 1000,
-                eval_interval: int = 100, verbose: bool = True,
-                show_progress: bool = True):
-    """Train agents through self-play.
-    
-    Args:
-        agents: List of agents to train
-        num_episodes: Number of training episodes
-        eval_interval: Evaluate every N episodes
-        verbose: Print progress
-        show_progress: Show visual progress tracker
-    """
-    print("="*60)
-    print("TRAINING AGENTS")
-    print("="*60)
-    print(f"Agents: {[a.name for a in agents]}")
-    print(f"Episodes: {num_episodes}")
-    print()
-    
-    # Separate trainable and fixed agents
-    trainable = [a for a in agents if hasattr(a, 'update')]
-    
-    if not trainable:
-        print("No trainable agents found!")
-        return
-    
-    print(f"Trainable agents: {[a.name for a in trainable]}")
-    print()
-    
-    tournament = Tournament(agents, num_players=2)
-    
-    # Initialize progress tracker
-    tracker = None
-    if show_progress:
-        tracker = ProgressTracker(num_episodes, update_interval=5.0)
-        tracker.start()
-    
-    for episode in range(num_episodes):
-        # Run training game
-        agent_indices = random.sample(range(len(agents)), 2)
-        result = tournament.run_game(agent_indices, verbose=False)
-        
-        if tracker:
-            tracker.update(result)
-        
-        # Periodic text evaluation
-        if not show_progress and (episode + 1) % eval_interval == 0:
-            if verbose:
-                print(f"Episode {episode + 1}/{num_episodes}")
-                results = tournament.get_results()
-                for agent_name, stats in results['agent_stats'].items():
-                    if stats['games'] > 0:
-                        print(f"  {agent_name}: {stats['win_rate']:.1f}% win rate "
-                              f"({stats['wins']}/{stats['games']})")
-                print()
-    
-    if tracker:
-        tracker.finish()
-    
-    # Final results
-    tournament.print_results()
-    return tournament
-
-
 if __name__ == "__main__":
-    from agent import (RandomAgent, HeuristicAgent, GreedyAgent,
-                       ConservativeAgent, QLearningAgent, HoardingAgent,
-                       AggressiveAgent, BalancedAgent, SmartWormAgent)
+    from agent import SmartWormAgent
 
-    # Create 3 agents: SmartWorm + Random + Heuristic
-    agents = [
-        RandomAgent("Random"),
-        HeuristicAgent("Heuristic"),
-        SmartWormAgent("SmartWorm"),  # Now has solve() disabled - should be fast
-    ]
-
+    # Create SmartWorm agents only for testing
     worm_agents = [
         SmartWormAgent("SmartWorm_1"),
         SmartWormAgent("SmartWorm_2")
@@ -583,37 +548,12 @@ if __name__ == "__main__":
     print("Rummikub ML Tournament System")
     print("="*60)
     print("\nAgent Strategies:")
-    print("  - Random: Completely random valid moves")
-    print("  - Heuristic: Simple priority-based selection")
-    print("  - Greedy: Aggressive tile playing")
-    print("  - Conservative: Defensive, prefers drawing")
-    print("  - Hoarding10/15: Saves tiles until big play (10 or 15 tiles)")
-    print("  - Aggressive: Uses worm logic to play immediately")
-    print("  - Balanced: Middle ground strategy with worm scoring")
     print("  - SmartWorm: Deep worm.py solver integration")
-    print("  - QLearning: Tabular Q-learning")
 
-    # Option 1: Tournament with SmartWorm + 2 others, 100 games
+    # Run tournament with SmartWorm vs SmartWorm
     print("\n" + "="*60)
-    print("1. Running Tournament: SmartWorm vs Random vs Heuristic (100 games)")
+    print("Running Tournament: SmartWorm vs SmartWorm")
     print("="*60)
     tournament = Tournament(worm_agents, num_players=2)
-    tournament.run_random_matchups(num_games=10, verbose=False, show_progress=True, progress_interval=2.0)
+    tournament.run_random_matchups(num_games=1, verbose=False, show_progress=True, progress_interval=2.0)
     tournament.print_results()
-
-    # Option 2: Ultra-fast test (5 games only)
-    # print("\n" + "="*60)
-    # print("2. Ultra-Fast Test (5 games)...")
-    # print("="*60)
-    # fast_agents = [
-    #     RandomAgent("Random"),
-    #     HeuristicAgent("Heuristic"),
-    #     AggressiveAgent("Aggressive"),
-    # ]
-    # tournament2 = Tournament(fast_agents, num_players=2)
-    # tournament2.run_random_matchups(num_games=5, show_progress=True, progress_interval=0.5)
-    # tournament2.print_results()
-
-    # Option 3: Training with progress tracker (if you have trainable agents)
-    # print("\n3. Training Q-Learning Agent with progress tracking...")
-    # train_agents(agents, num_episodes=500, eval_interval=100, show_progress=True)

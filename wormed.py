@@ -1,8 +1,3 @@
-# board_matrix = [[1,1,1,0,1,2,2,1,2,2,2,2,2],
-#                 [0,2,2,2,2,2,0,0,1,0,0,0,1],
-#                 [0,1,1,1,1,2,2,2,2,2,2,1,1],
-#                 [0,1,2,1,1,0,0,0,1,0,0,0,1]]
-
 from functools import lru_cache
 
 # Global cache for solved board states (transposition table)
@@ -11,11 +6,6 @@ _solve_cache = {}
 def board_to_hashable(board_matrix):
     """Convert board to hashable form for caching."""
     return tuple(tuple(row) for row in board_matrix)
-
-board_matrix = [[1, 2, 2, 2, 2, 2, 2, 2, 2, 1, 2, 1, 2],
-                [1, 2, 2, 2, 2, 2, 2, 2, 2, 1, 1, 1, 2],
-                [1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2],
-                [1, 2, 2, 2, 2, 2, 2, 2, 2, 1, 1, 1, 2]]
 
 def definite_moves(board_matrix):
     moves = []
@@ -546,7 +536,7 @@ def format_solution(solution, color_names=None):
     return formatted
 
 
-if __name__ == "__main__":
+def solved(board_matrix):
     from copy import deepcopy
     
     print("=" * 60)

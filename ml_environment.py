@@ -251,9 +251,9 @@ class RummikubMLEnv:
                                 break
                     
                     if tile_idx in tile_indices and len(tile_indices) >= 3:
-                        # Check initial meld requirement
+                        # Check initial meld requirement (15 points)
                         if (self.game_state.has_initial_meld[player_id] or 
-                            Meld.calculate_value(meld_tiles) >= 30):
+                            Meld.calculate_value(meld_tiles) >= 15):
                             
                             if self.game_state.play_meld(player_id, tile_indices):
                                 info['action_taken'] = 'PLAY_NEW_MELD'

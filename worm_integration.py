@@ -12,7 +12,8 @@ from worm import (
     get_all_groups,
     apply_move,
     is_solved,
-    solve
+    solve,
+    board_to_hashable
 )
 
 from typing import List, Dict, Tuple, Optional, Any
@@ -77,10 +78,11 @@ def find_hand_only_moves(hand: List[Tile]) -> List[Tuple]:
         return []
     
     board = hand_to_board_matrix(hand)
+    board_hashable = board_to_hashable(board)
     
     # Get all possible runs and groups
-    runs = get_all_runs(board)
-    groups = get_all_groups(board)
+    runs = get_all_runs(board_hashable)
+    groups = get_all_groups(board_hashable)
     
     return runs + groups
 
@@ -107,14 +109,15 @@ def find_combined_moves(hand: List[Tile],
     hand_board = hand_to_board_matrix(hand)
     table_board = table_to_board_matrix(table_melds)
     combined_board = combine_boards(hand_board, table_board)
+    combined_hashable = board_to_hashable(combined_board)
     
     # Find hand-only moves
     result['hand_only'] = find_hand_only_moves(hand)
     
     # Find moves using worm logic on combined board
     # These are moves that become possible when considering hand+table together
-    all_combined_runs = get_all_runs(combined_board)
-    all_combined_groups = get_all_groups(combined_board)
+    all_combined_runs = get_all_runs(combined_hashable)
+    all_combined_groups = get_all_groups(combined_hashable)
     
     # Filter to moves that use at least one hand tile
     for move in all_combined_runs + all_combined_groups:

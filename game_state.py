@@ -30,7 +30,7 @@ class GameState:
         self.game_over = False
         self.winner: Optional[int] = None
         self.turn_count = 0
-        self.max_turns = 1000  # Prevent infinite games
+        self.max_turns = 500  # Prevent infinite games
     
     def reset(self, seed: Optional[int] = None) -> None:
         """Reset game to initial state.
@@ -285,8 +285,8 @@ class GameState:
             for indices in combinations(range(len(hand)), size):
                 tiles = [hand[i] for i in indices]
                 if Meld.is_valid(tiles):
-                    # Check initial meld requirement
-                    if self.has_initial_meld[player_id] or Meld.calculate_value(tiles) >= 30:
+                    # Check initial meld requirement (15 points)
+                    if self.has_initial_meld[player_id] or Meld.calculate_value(tiles) >= 15:
                         actions.append({
                             'type': 'PLAY_NEW_MELD',
                             'tile_indices': list(indices)

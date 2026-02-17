@@ -293,31 +293,32 @@ class Meld:
         return self_sorted == other_sorted
 
 
-def find_all_valid_melds(tiles: List[Tile], max_tiles: int = 4) -> List[List[Tile]]:
+def find_all_valid_melds(tiles: List[Tile], max_tiles: int = 13) -> List[List[Tile]]:
     """Find valid melds from a set of tiles.
     
-    OPTIMIZED: Only checks runs/groups of 3-4 tiles (standard Rummikub).
-    Does NOT check all combinations - uses smarter validation.
+    Checks all runs/groups of 3+ tiles.
     
     Args:
         tiles: List of tiles to check
-        max_tiles: Maximum tiles in a meld (default 4, standard Rummikub)
+        max_tiles: Maximum tiles in a meld (default 13)
         
     Returns:
         List of valid melds (each meld is a list of tiles)
     """
     valid_melds = []
     
-    # Only check groups of 3-4 tiles (standard Rummikub)
-    # This is MUCH faster than checking all combinations
+    # Only check groups of 3-13 tiles
     from itertools import combinations
     
-    # Limit to avoid exponential explosion
-    if len(tiles) > 15:
-        tiles = tiles[:15]  # Limit for performance
+    # For performance, don't check ALL combinations if hand is large
+    # But allow enough to find valid melds
+    tiles_to_check = list(tiles)
     
-    for size in range(3, min(max_tiles + 1, len(tiles) + 1)):
-        for combo in combinations(tiles, size):
+    # Check sizes from 3 up to min(13, len(tiles))
+    max_size = min(max_tiles, len(tiles))
+    
+    for size in range(3, max_size + 1):
+        for combo in combinations(tiles_to_check, size):
             tile_list = list(combo)
             if Meld.is_valid(tile_list):
                 valid_melds.append(tile_list)
